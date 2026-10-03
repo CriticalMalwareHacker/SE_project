@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+apps/web/node_modules/
+
+# Build outputs
+dist/
+apps/web/dist/
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+!.env.example
+.env
+
+# Caches / tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.vite/
+*.tsbuildinfo
+
+# Runtime data (local only, never commit)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+apps/server/.env
+apps/target/.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/

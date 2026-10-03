@@ -1,0 +1,1 @@
+{"name": "guardloop-target", "private": true, "scripts": {"dev": "python app.py & python metadata.py"}}
