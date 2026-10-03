@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import { Shield, Zap, CheckCircle2, RefreshCw, FileText } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer } from "recharts";
-import { Badge, Button, Card, Progress, ScrollArea, Skeleton, Tooltip } from "../components/ui";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { FieldSelect } from "../components/field-select";
+import { ToneBadge } from "../components/status";
+import { Button } from "@/components/ui/button";
 import { emptyMetrics, useStore } from "../store";
 
 const STAGES = [
@@ -46,7 +53,7 @@ export default function Overview({ onNew }: { onNew: () => void }) {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold text-slate-50">Overview</h1>
-      <Card>
+      <Card className="p-5">
         <div className="grid grid-cols-5 gap-2">
           {STAGES.map((s, i) => {
             const I = s.icon;
@@ -55,7 +62,7 @@ export default function Overview({ onNew }: { onNew: () => void }) {
                 <span className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-md bg-slate-800"><I size={24} strokeWidth={1.5} className="text-teal-400" /></span>
                 <p className="text-sm font-medium text-slate-200">{s.name}</p>
                 <p className="text-xs text-slate-400">{s.caption}</p>
-                <Badge tone="info" className="mt-1 tabular-nums">{counts[s.id] ?? 0}</Badge>
+                <ToneBadge tone="info"><span className="tabular-nums">{counts[s.id] ?? 0}</span></ToneBadge>
                 {i < 4 && <span className="absolute -right-2 top-1/2 hidden h-px w-4 bg-slate-700 lg:block" />}
               </div>
             );
@@ -74,7 +81,7 @@ export default function Overview({ onNew }: { onNew: () => void }) {
         <Metric title="Time to Mitigation" value={m.time_to_mitigation_avg_s != null ? `${m.time_to_mitigation_avg_s}s` : "—"} base="vs multi-day manual cycles" pct={50} tip="Mean seconds from candidate to Verified Fixed" />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
+        <Card className="p-5">
           <h2 className="mb-2 text-lg font-medium text-slate-50">Time-to-mitigation trend</h2>
           {trend.length === 0 ? <Skeleton className="h-32" /> : (
             <ResponsiveContainer width="100%" height={160}>
@@ -82,19 +89,17 @@ export default function Overview({ onNew }: { onNew: () => void }) {
             </ResponsiveContainer>
           )}
         </Card>
-        <Card>
+        <Card className="p-5">
           <h2 className="mb-2 text-lg font-medium text-slate-50">Cost & tokens</h2>
           <p className="mono tabular-nums text-sm text-slate-200">LLM calls {scan.llm_calls_used ?? 0} / budget · tokens {Object.values((scan.token_totals || {}) as Record<string, number>).reduce((a: number, b) => a + Number(b || 0), 0)} · ${scan.cost_total ?? 0}</p>
           <div className="mt-2"><Progress value={Math.min(100, ((scan.llm_calls_used ?? 0) / 150) * 100)} /></div>
         </Card>
       </div>
-      <Card>
+      <Card className="p-5">
         <div className="mb-2 flex items-center gap-2">
           <h2 className="text-lg font-medium text-slate-50">Live Agent Activity</h2>
           <span className="flex-1" />
-          <select aria-label="Filter by agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="rounded-md border border-slate-800 bg-slate-950 px-2 py-1 text-sm">
-            {["all", "guard_gate", "attack", "verify_fix", "confirm", "report"].map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
+          <FieldSelect label="Filter by agent" value={agentFilter} onChange={setAgentFilter} options={["all", "guard_gate", "attack", "verify_fix", "confirm", "report"]} />
         </div>
         <ScrollArea className="h-64">
           <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} className="flex flex-col gap-1">
@@ -108,12 +113,12 @@ export default function Overview({ onNew }: { onNew: () => void }) {
           </div>
         </ScrollArea>
       </Card>
-      <Card>
+      <Card className="p-5">
         <h2 className="mb-2 text-lg font-medium text-slate-50">Findings Snapshot</h2>
         {(scan.findings || []).length === 0 ? <p className="text-sm text-slate-500">No findings yet.</p> : (
           <ul className="flex flex-col gap-2">
             {(scan.findings || []).slice(-5).reverse().map((f) => (
-              <li key={f.id} className="mono flex gap-2 text-xs text-slate-300"><span>{f.id}</span><span className="truncate">{f.title}</span><Badge tone={f.status === "Reported" ? "success" : f.status === "Rejected" ? "neutral" : "warning"}>{f.status}</Badge></li>
+              <li key={f.id} className="mono flex gap-2 text-xs text-slate-300"><span>{f.id}</span><span className="truncate">{f.title}</span><ToneBadge tone={f.status === "Reported" ? "success" : f.status === "Rejected" ? "neutral" : "warning"}>{f.status ?? ""}</ToneBadge></li>
             ))}
           </ul>
         )}
@@ -124,8 +129,13 @@ export default function Overview({ onNew }: { onNew: () => void }) {
 
 function Metric({ title, value, base, pct, tip }: { title: string; value: string; base: string; pct: number; tip: string }) {
   return (
-    <Card>
-      <p className="text-sm text-slate-400"><Tooltip tip={tip}>{title}</Tooltip></p>
+    <Card className="p-5">
+      <p className="text-sm text-slate-400">
+        <Tooltip>
+          <TooltipTrigger className="cursor-help underline decoration-dotted decoration-slate-600">{title}</TooltipTrigger>
+          <TooltipContent>{tip}</TooltipContent>
+        </Tooltip>
+      </p>
       <p className="tabular-nums text-2xl font-semibold text-slate-50">{value}</p>
       <p className="mb-2 text-xs text-slate-500">{base}</p>
       <Progress value={pct} />

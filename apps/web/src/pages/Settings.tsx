@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { Button, Card, Input, Label, Skeleton, toast } from "../components/ui";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useStore } from "../store";
 import { api } from "../api/client";
 
@@ -14,7 +19,7 @@ export default function Settings() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold text-slate-50">Settings</h1>
-      <Card>
+      <Card className="p-5">
         <div className="grid grid-cols-2 gap-3">
           {num("Reproducibility threshold", "reproducibility_threshold", settings.reproducibility_threshold)}
           {num("Max retry attempts", "max_retry_attempts", settings.max_retry_attempts)}
@@ -31,7 +36,7 @@ export default function Settings() {
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => { setBusy(true); api<{ ok: boolean; detail: string }>("/api/llm/test", { method: "POST" }).then((r) => toast(r.ok ? "OpenRouter OK" : `OpenRouter: ${r.detail}`)).catch((e: Error) => toast(e.message)).finally(() => setBusy(false)); }} disabled={busy}>Test OpenRouter connection</Button>
           {scanId && <Button variant="outline" onClick={() => void api(`/api/scans/${scanId}/export`).then((j) => { const b = new Blob([JSON.stringify(j, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = "scan.json"; a.click(); })}>Export scan JSON</Button>}
-          <Button variant="destructive" onClick={() => void api("/api/target/reset", { method: "POST" }).then(() => toast("Target reset to vulnerable baseline"))}>Reset all data</Button>
+          <Button variant="destructive" onClick={() => void api("/api/target/reset", { method: "POST" }).then(() => toast.success("Target reset to vulnerable baseline"))}>Reset all data</Button>
         </div>
       </Card>
     </div>

@@ -1,5 +1,6 @@
 import { Users } from "lucide-react";
-import { Badge, Card } from "../components/ui";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ToneBadge } from "../components/status";
 import { useStore } from "../store";
 import { Empty } from "./Findings";
 
@@ -24,16 +25,18 @@ export default function Agents() {
           const last = [...events].reverse().find((e) => e.agent === a.id)?.message || "idle";
           const active = scan.status === "Running";
           return (
-            <Card key={a.id}>
-              <div className="mb-1 flex items-center gap-2">
+            <Card key={a.id} className="p-5">
+              <CardHeader className="mb-1 flex-row items-center gap-2 p-0">
                 <Users size={16} className="text-teal-400" />
-                <h2 className="text-lg font-medium text-slate-50">{a.name}</h2>
+                <CardTitle>{a.name}</CardTitle>
                 <span className="flex-1" />
-                <Badge tone={active ? "info" : "neutral"}>{active ? "Active" : "Idle"}</Badge>
-              </div>
-              <p className="mb-2 text-sm text-slate-400">{a.desc}</p>
-              <p className="mono tabular-nums text-xs text-slate-300">actions: {counters[a.id] ?? 0} · tokens: {tokens[a.id] ?? 0}</p>
-              <p className="mono mt-1 truncate text-xs text-slate-500" title={last}>last: {last}</p>
+                <ToneBadge tone={active ? "info" : "neutral"}>{active ? "Active" : "Idle"}</ToneBadge>
+              </CardHeader>
+              <CardContent className="p-0">
+                <CardDescription className="mb-2">{a.desc}</CardDescription>
+                <p className="mono tabular-nums text-xs text-slate-300">actions: {counters[a.id] ?? 0} · tokens: {tokens[a.id] ?? 0}</p>
+                <p className="mono mt-1 truncate text-xs text-slate-500" title={last}>last: {last}</p>
+              </CardContent>
             </Card>
           );
         })}

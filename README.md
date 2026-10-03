@@ -62,6 +62,6 @@ npm --prefix apps/web run test -- --run
 
 ## What was deliberately left out
 
-- Full `shadcn/ui` CLI install (no network theme registry in this env): equivalent minimal `src/components/ui.tsx` primitives with the same component names/roles are vendored instead.
+- Full `shadcn/ui` CLI install: all required primitives live in `apps/web/src/components/ui/` (Base-UI-backed shadcn, `base-nova` style) with the app's slate/teal dark theme mapped onto the shadcn CSS variables in `globals.css`. Shared status/severity badges and the labeled select wrapper live in `src/components/` as thin shadcn customizations (variants + className only; generated files untouched).
 - Real OpenRouter streaming/billing pages; cost is estimated from `usage.total_tokens`.
 - Multi-target orchestration beyond the single local demo target (Guard Gate would need an explicit allowlist UI, which the safety rules forbid widening).
