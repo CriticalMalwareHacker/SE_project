@@ -1,0 +1,43 @@
+import { Users } from "lucide-react";
+import { Badge, Card } from "../components/ui";
+import { useStore } from "../store";
+import { Empty } from "./Findings";
+
+const AGENTS = [
+  { id: "guard_gate", name: "Guard Gate", desc: "Allowlist scope check, probe budget, kill switch." },
+  { id: "attack", name: "Attack Agents", desc: "LLM-proposed payloads sent to the local target; success by programmatic check." },
+  { id: "verify_fix", name: "Verify & Fix", desc: "Replay N times, reject hallucinations, draft and apply whitelisted mitigations." },
+  { id: "confirm", name: "Confirm Agent", desc: "Re-attack with mutations; loop back if the fix is bypassed." },
+  { id: "report", name: "Report Agent", desc: "Grounded technical + plain-language reports for verified fixes." },
+];
+
+export default function Agents() {
+  const { scan, events } = useStore();
+  if (!scan) return <Empty msg="No scan yet. Agent cards appear once a scan runs." />;
+  const counters = (scan.agent_counters || {}) as Record<string, number>;
+  const tokens = (scan.token_totals || {}) as Record<string, number>;
+  return (
+    <div className="flex flex-col gap-4">
+      <h1 className="text-2xl font-semibold text-slate-50">Agents</h1>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {AGENTS.map((a) => {
+          const last = [...events].reverse().find((e) => e.agent === a.id)?.message || "idle";
+          const active = scan.status === "Running";
+          return (
+            <Card key={a.id}>
+              <div className="mb-1 flex items-center gap-2">
+                <Users size={16} className="text-teal-400" />
+                <h2 className="text-lg font-medium text-slate-50">{a.name}</h2>
+                <span className="flex-1" />
+                <Badge tone={active ? "info" : "neutral"}>{active ? "Active" : "Idle"}</Badge>
+              </div>
+              <p className="mb-2 text-sm text-slate-400">{a.desc}</p>
+              <p className="mono tabular-nums text-xs text-slate-300">actions: {counters[a.id] ?? 0} · tokens: {tokens[a.id] ?? 0}</p>
+              <p className="mono mt-1 truncate text-xs text-slate-500" title={last}>last: {last}</p>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --accent: #2dd4bf;
+}
+
+body {
+  background-color: #020617;
+  color: #e2e8f0;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot { animation: none; }
+  * { transition: none !important; }
+}
+@keyframes flash-new {
+  from { background-color: rgba(45, 212, 191, 0.25); }
+  to { background-color: transparent; }
+}
+.flash-new { animation: flash-new 1.2s ease-out 1; }
+@keyframes loopdash {
+  to { stroke-dashoffset: -24; }
+}
+.loop-active { stroke-dasharray: 6 6; animation: loopdash 1s linear infinite; }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; color: #000; }
+}
