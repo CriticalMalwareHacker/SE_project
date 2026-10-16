@@ -54,6 +54,19 @@ def create_app() -> Flask:
     def health():
         return jsonify({"ok": True, "mitigations": app.config["MITIGATIONS"]})
 
+    @app.get("/v1/demo/users")
+    def demo_users():
+        """Synthetic training identities only; never backed by real user records."""
+        return jsonify({
+            "dataset": "synthetic-local-training-data",
+            "warning": "These are fake demo credentials, not real accounts.",
+            "users": [
+                {"id": "demo-001", "name": "Alice Demo", "email": "alice@example.test", "password": "DEMO-ONLY-Alice-123!"},
+                {"id": "demo-002", "name": "Bob Demo", "email": "bob@example.test", "password": "DEMO-ONLY-Bob-456!"},
+                {"id": "demo-003", "name": "Casey Demo", "email": "casey@example.test", "password": "DEMO-ONLY-Casey-789!"},
+            ],
+        })
+
     @app.get("/admin/config")
     def admin_config():
         if not admin_ok():

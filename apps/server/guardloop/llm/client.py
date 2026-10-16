@@ -28,12 +28,21 @@ class BudgetExceeded(Exception):
 
 
 class LLMClient:
-    def __init__(self, base_url: str, api_key: str, model: str, max_tokens: int = 1024, concurrency: int = 3):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        max_tokens: int = 2048,
+        concurrency: int = 3,
+        reasoning_effort: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.model = model or "openrouter/auto"
+        self.model = model
         self.max_tokens = max_tokens
         self.concurrency = concurrency
+        self.reasoning_effort = reasoning_effort
         self.calls = 0
         self.tokens = 0
         self.cost = 0.0
@@ -45,9 +54,11 @@ class LLMClient:
         budget: dict | None = None,
         fallback: BaseModel | None = None,
         response_model: type[BaseModel] | None = None,
-        timeout: float = 20.0,
+        timeout: float = 60.0,
     ) -> tuple[dict[str, Any], bool]:
         """Returns (parsed_or_fallback_dict, used_fallback). Raises BudgetExceeded."""
+        if not self.model:
+            raise RuntimeError("model ID is not configured for this agent")
         if cancel is not None and cancel.is_set():
             raise BudgetExceeded("cancelled")
         if budget is not None and budget.get("used", 0) >= budget.get("limit", 150):
@@ -113,6 +124,8 @@ class LLMClient:
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {"model": self.model, "messages": messages, "max_tokens": self.max_tokens, "response_format": {"type": "json_object"}}
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
         last_err: Exception | None = None
         for attempt in range(3):
             if cancel is not None and cancel.is_set():
@@ -136,6 +149,8 @@ class LLMClient:
         raise RuntimeError(f"llm failed after retries: {last_err}")
 
     def test(self) -> tuple[bool, str]:
+        if not self.model:
+            return False, "model ID is not configured for this agent"
         try:
             with httpx.Client(timeout=10, follow_redirects=False) as c:
                 r = c.post(

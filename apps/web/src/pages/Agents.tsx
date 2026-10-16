@@ -13,7 +13,7 @@ const AGENTS = [
 ];
 
 export default function Agents() {
-  const { scan, events } = useStore();
+  const { scan, events, settings } = useStore();
   if (!scan) return <Empty msg="No scan yet. Agent cards appear once a scan runs." />;
   const counters = (scan.agent_counters || {}) as Record<string, number>;
   const tokens = (scan.token_totals || {}) as Record<string, number>;
@@ -24,6 +24,7 @@ export default function Agents() {
         {AGENTS.map((a) => {
           const last = [...events].reverse().find((e) => e.agent === a.id)?.message || "idle";
           const active = scan.status === "Running";
+          const modelInfo = settings?.models?.[a.id] as { provider?: string; model?: string } | undefined;
           return (
             <Card key={a.id} className="p-5">
               <CardHeader className="mb-1 flex-row items-center gap-2 p-0">
@@ -35,6 +36,7 @@ export default function Agents() {
               <CardContent className="p-0">
                 <CardDescription className="mb-2">{a.desc}</CardDescription>
                 <p className="mono tabular-nums text-xs text-slate-300">actions: {counters[a.id] ?? 0} · tokens: {tokens[a.id] ?? 0}</p>
+                {modelInfo && <p className="mono mt-1 text-xs text-slate-500">{modelInfo.provider || ""}: {modelInfo.model || "model not set"}</p>}
                 <p className="mono mt-1 truncate text-xs text-slate-500" title={last}>last: {last}</p>
               </CardContent>
             </Card>

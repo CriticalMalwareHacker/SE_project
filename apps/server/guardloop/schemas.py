@@ -4,7 +4,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class FindingStatus(str, Enum):
@@ -115,16 +115,9 @@ class LogEntry(BaseModel):
 
 
 class ScanConfig(BaseModel):
+    lab: Literal["guardloop", "juice_shop"] = "guardloop"
     target: str = "http://127.0.0.1:5001"
-    allowed_endpoints: list[str] = Field(
-        default_factory=lambda: [
-            "/v1/chat/completions",
-            "/v1/admin/view",
-            "/v1/tools/fetch",
-            "/v1/threads/1",
-            "/v1/rate-test",
-        ]
-    )
+    allowed_endpoints: list[str] = Field(default_factory=list)
     probe_budget: int = 60
     seed: int = 42
     authorization: bool = False
@@ -134,6 +127,29 @@ class ScanConfig(BaseModel):
     reproducibility_threshold: float = 0.6
     hallucination_rate: float = 0.25
     fix_failure_rate: float = 0.35
+
+    @model_validator(mode="after")
+    def only_lab_endpoints(self) -> "ScanConfig":
+        allowed_by_lab = {
+            "guardloop": [
+                "/v1/chat/completions",
+                "/v1/admin/view",
+                "/v1/tools/fetch",
+                "/v1/threads/2",
+                "/v1/rate-test",
+            ],
+            "juice_shop": ["/rest/products/search", "/rest/user/whoami"],
+        }
+        allowed = set(allowed_by_lab[self.lab])
+        endpoints = self.allowed_endpoints or allowed_by_lab[self.lab]
+        if not endpoints or any(endpoint not in allowed for endpoint in endpoints):
+            raise ValueError("choose one or more supported probes for the selected local lab")
+        self.allowed_endpoints = list(dict.fromkeys(endpoints))
+        if self.target == "http://127.0.0.1:5001" and self.lab == "juice_shop":
+            self.target = "http://127.0.0.1:3000"
+        elif self.target == "http://127.0.0.1:3000" and self.lab == "guardloop":
+            self.target = "http://127.0.0.1:5001"
+        return self
 
 
 class TaskNode(BaseModel):
@@ -176,7 +192,7 @@ class Settings(BaseModel):
     sim_speed: float = 1.0
     hallucination_rate: float = 0.25
     fix_failure_rate: float = 0.35
-    models: dict[str, str] = Field(default_factory=dict)
+    models: dict[str, Any] = Field(default_factory=dict)
 
 
 ALL_MODELS = [Finding, AgentEvent, LogEntry, ScanConfig, ScanState, Metrics, Settings, TaskNode]

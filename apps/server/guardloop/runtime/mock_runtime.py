@@ -88,7 +88,7 @@ class MockRuntime(AgentRuntime):
         for f in ctx["state"]["findings"]:
             if f["status"] in ("Candidate", "Verifying", "Fixing", "Retesting"):
                 f["status"] = "Halted mid-loop"
-        bus.publish(scan_id, "halted", "guard_gate", f"Kill switch engaged {reason}".strip(), {})
+        bus.publish(scan_id, "halted", "guard_gate", f"Kill switch engaged {reason}".strip(), {}, terminal=True)
         manager.persist(scan_id)
 
     def set_speed(self, scan_id: str, speed: float) -> None:

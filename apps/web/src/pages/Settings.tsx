@@ -31,10 +31,11 @@ export default function Settings() {
           {num("Hallucination rate (mock)", "hallucination_rate", settings.hallucination_rate)}
           {num("Fix-failure rate (mock)", "fix_failure_rate", settings.fix_failure_rate)}
         </div>
-        <h2 className="mt-4 text-lg font-medium text-slate-50">Models (read-only, from server env)</h2>
+        <h2 className="mt-4 text-lg font-medium text-slate-50">Agent providers and models (read-only, from server env)</h2>
+        <p className="mb-2 text-xs text-slate-500">Set routing in apps/server/.env. Credentials stay on the server.</p>
         <pre className="mono mt-1 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-300">{JSON.stringify(settings.models, null, 2)}</pre>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => { setBusy(true); api<{ ok: boolean; detail: string }>("/api/llm/test", { method: "POST" }).then((r) => toast(r.ok ? "OpenRouter OK" : `OpenRouter: ${r.detail}`)).catch((e: Error) => toast(e.message)).finally(() => setBusy(false)); }} disabled={busy}>Test OpenRouter connection</Button>
+          <Button variant="outline" onClick={() => { setBusy(true); api<{ ok: boolean; detail: string }>("/api/llm/test", { method: "POST" }).then((r) => toast(r.ok ? "Attack Agent provider connected" : r.detail)).catch((e: Error) => toast(e.message)).finally(() => setBusy(false)); }} disabled={busy}>Test Attack Agent provider</Button>
           {scanId && <Button variant="outline" onClick={() => void api(`/api/scans/${scanId}/export`).then((j) => { const b = new Blob([JSON.stringify(j, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = "scan.json"; a.click(); })}>Export scan JSON</Button>}
           <Button variant="destructive" onClick={() => void api("/api/target/reset", { method: "POST" }).then(() => toast.success("Target reset to vulnerable baseline"))}>Reset all data</Button>
         </div>

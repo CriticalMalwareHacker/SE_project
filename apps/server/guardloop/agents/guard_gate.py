@@ -46,11 +46,14 @@ def is_local_allowed(target: str, allowed_port: int = 5001) -> tuple[bool, str]:
         return False, f"out of scope: {e}"
 
 
-def validate_scan(target: str, authorization: bool, probe_budget: int) -> tuple[bool, str]:
+def validate_scan(target: str, authorization: bool, probe_budget: int, lab: str = "guardloop") -> tuple[bool, str]:
     if not authorization:
         log.info("guard blocked: missing authorization acknowledgement")
         return False, "authorization required"
-    ok, reason = is_local_allowed(target)
+    if lab not in ("guardloop", "juice_shop"):
+        return False, "out of scope: unsupported local lab"
+    allowed_port = 3000 if lab == "juice_shop" else 5001
+    ok, reason = is_local_allowed(target, allowed_port=allowed_port)
     if not ok:
         log.info("guard blocked: %s target=%s", reason, target)
         return False, reason

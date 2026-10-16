@@ -26,6 +26,7 @@ interface Store {
   loadMode: () => Promise<void>;
   loadSettings: () => Promise<void>;
   startScan: (body: Record<string, unknown>) => Promise<void>;
+  adoptScan: (scanId: string) => Promise<void>;
   refreshScan: () => Promise<void>;
   applyEvent: (e: BusEvent) => void;
   setFilters: (s: Partial<Pick<Store, "statusFilter" | "severityFilter" | "search">>) => void;
@@ -83,6 +84,11 @@ export const useStore = create<Store>((set, get) => ({
     set({ scanId: r.id, events: [], scan: null });
     await get().refreshScan();
     connectSSE(r.id, get().applyEvent);
+  },
+  adoptScan: async (scanId) => {
+    set({ scanId, events: [], scan: null });
+    await get().refreshScan();
+    connectSSE(scanId, get().applyEvent);
   },
   refreshScan: async () => {
     const { scanId } = get();

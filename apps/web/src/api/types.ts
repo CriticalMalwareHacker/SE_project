@@ -75,6 +75,7 @@ export interface LogEntry {
 }
 
 export interface ScanConfig {
+  lab?: "guardloop" | "juice_shop";
   target?: string;
   allowed_endpoints?: string[];
   probe_budget?: number;

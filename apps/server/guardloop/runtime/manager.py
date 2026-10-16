@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from guardloop import store
-from guardloop.config import get_config
+from guardloop.config import get_config, is_mock_mode
 from guardloop.schemas import ScanConfig, ScanStatus
 
 _lock = threading.RLock()
@@ -36,6 +36,7 @@ def _blank_state(scan_id: str, config: ScanConfig) -> dict[str, Any]:
 def create_scan(config: ScanConfig) -> str:
     from guardloop.runtime.live_runtime import LiveRuntime
     from guardloop.runtime.mock_runtime import MockRuntime
+    from guardloop.runtime.juice_shop import JuiceShopRuntime
 
     cfg = get_config()
     scan_id = uuid.uuid4().hex[:8]
@@ -51,8 +52,8 @@ def create_scan(config: ScanConfig) -> str:
             "halted": False,
         }
     store.save_scan(scan_id, state)
-    mock_mode = not cfg["OPENROUTER_API_KEY"]
-    rt = MockRuntime() if mock_mode else LiveRuntime()
+    mock_mode = is_mock_mode()
+    rt = JuiceShopRuntime() if config.lab == "juice_shop" else (MockRuntime() if mock_mode else LiveRuntime())
     with _lock:
         _runtimes[scan_id] = rt
     rt.start(scan_id, config)

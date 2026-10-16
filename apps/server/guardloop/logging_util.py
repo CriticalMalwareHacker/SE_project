@@ -8,9 +8,10 @@ REDACT = "REDACTED"
 
 
 def redact(text: str) -> str:
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if key and key in text:
-        text = text.replace(key, REDACT)
+    for name in ("OPENROUTER_API_KEY", "NVIDIA_API_KEY"):
+        key = os.environ.get(name, "")
+        if key and key in text:
+            text = text.replace(key, REDACT)
     # redact bearer tokens generically
     return text
 

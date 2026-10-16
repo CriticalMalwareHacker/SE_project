@@ -13,12 +13,10 @@
   "dependencies": {
     "@base-ui/react": "^1.8.0",
     "@fontsource-variable/geist": "^5.3.0",
-    "@rolldown/binding-win32-x64-msvc": "^1.2.12",
     "@testing-library/dom": "^10.4.2",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.4.0",
-    "lightningcss-win32-x64-msvc": "^1.33.0",
     "lucide-react": "^1.51.0",
     "next-themes": "^0.4.6",
     "react": "^19.3.0",
