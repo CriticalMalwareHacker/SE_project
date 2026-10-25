@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from guardloop import store
-from guardloop.config import get_config, is_mock_mode
+from guardloop.config import is_mock_mode
 from guardloop.schemas import ScanConfig, ScanStatus
 
 _lock = threading.RLock()
@@ -33,12 +33,11 @@ def _blank_state(scan_id: str, config: ScanConfig) -> dict[str, Any]:
     }
 
 
-def create_scan(config: ScanConfig) -> str:
+def create_scan(config: ScanConfig, user_id: int | None = None) -> str:
     from guardloop.runtime.live_runtime import LiveRuntime
     from guardloop.runtime.mock_runtime import MockRuntime
     from guardloop.runtime.juice_shop import JuiceShopRuntime
 
-    cfg = get_config()
     scan_id = uuid.uuid4().hex[:8]
     state = _blank_state(scan_id, config)
     store.init_db()
@@ -50,8 +49,12 @@ def create_scan(config: ScanConfig) -> str:
             "speed": 1.0,
             "thread": None,
             "halted": False,
+            "persist_database": user_id is not None,
         }
     store.save_scan(scan_id, state)
+    if user_id is not None:
+        from guardloop.database import create_scan_record
+        create_scan_record(scan_id, user_id, "juice_shop" if config.lab == "juice_shop" else "bundled", state["status"])
     mock_mode = is_mock_mode()
     rt = JuiceShopRuntime() if config.lab == "juice_shop" else (MockRuntime() if mock_mode else LiveRuntime())
     with _lock:
@@ -84,6 +87,12 @@ def persist(scan_id: str) -> None:
         state = entry["state"] if entry else None
     if state:
         store.save_scan(scan_id, state)
+        with _lock:
+            entry = _scans.get(scan_id)
+            persist_database = bool(entry and entry.get("persist_database"))
+        if persist_database:
+            from guardloop.database import sync_scan
+            sync_scan(scan_id, state)
 
 
 def set_status(scan_id: str, status: str) -> None:

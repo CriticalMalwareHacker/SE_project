@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import json
 import re
+import socket
+import threading
+import time
+from functools import wraps
+from urllib.parse import urlparse
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+import jwt
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 from pydantic import ValidationError
 
 from guardloop import bus, store
@@ -15,10 +21,191 @@ from guardloop.schemas import ScanConfig, Settings
 
 log = get_logger("api")
 api = Blueprint("api", __name__)
+_neon_jwks_lock = threading.Lock()
+_neon_jwks_cache: tuple[float, dict] | None = None
 
 
 def err(code: int, error: str, detail: str = ""):
     return jsonify({"error": error, "detail": redact(detail)}), code
+
+
+def _resolve_host(host: str) -> list[str]:
+    """Resolve with a few retries; the local Windows resolver is flaky for Neon."""
+    for attempt in range(3):
+        try:
+            infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        except OSError:
+            if attempt < 2:
+                time.sleep(0.2 * (attempt + 1))
+            continue
+        ips = list(dict.fromkeys(info[4][0] for info in infos if info[4]))
+        if ips:
+            return ips
+    return []
+
+
+def _doh_resolve(host: str) -> list[str]:
+    """Fall back to DNS-over-HTTPS when the system resolver refuses the host."""
+    import httpx
+
+    try:
+        with httpx.Client(timeout=5, follow_redirects=False) as client:
+            response = client.get(
+                "https://cloudflare-dns.com/dns-query",
+                params={"name": host, "type": "A"},
+                headers={"Accept": "application/dns-json"},
+            )
+        response.raise_for_status()
+        answers = response.json().get("Answer", [])
+        return [str(answer["data"]) for answer in answers if answer.get("type") == 1 and answer.get("data")]
+    except Exception:
+        return []
+
+
+def _fetch_jwks(url: str) -> dict:
+    """Fetch JWKS by IP with SNI, avoiding repeated system DNS failures."""
+    global _neon_jwks_cache
+    now = time.monotonic()
+    with _neon_jwks_lock:
+        if _neon_jwks_cache and _neon_jwks_cache[0] > now:
+            return _neon_jwks_cache[1]
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        raise RuntimeError("JWKS URL has no hostname")
+    ips = _resolve_host(host) or _doh_resolve(host)
+    if not ips:
+        raise RuntimeError("JWKS host could not be resolved")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    last_error: Exception | None = None
+    import httpx
+
+    for ip in ips:
+        try:
+            target = parsed._replace(netloc=f"{ip}:{port}").geturl()
+            extensions = {"sni_hostname": host} if parsed.scheme == "https" else {}
+            with httpx.Client(timeout=10, follow_redirects=False) as client:
+                response = client.get(target, headers={"Host": host}, extensions=extensions)
+            response.raise_for_status()
+            data = response.json()
+            with _neon_jwks_lock:
+                _neon_jwks_cache = (time.monotonic() + 300, data)
+            return data
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"JWKS fetch failed: {last_error}")
+
+
+def _verified_neon_user() -> tuple[int, str] | None:
+    """Verify the bearer JWT Neon Auth issues for the current browser session."""
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None
+    token = header[7:].strip()
+    if not token or len(token) > 16384:
+        return None
+    cfg = get_config()
+    base_url = cfg["NEON_AUTH_BASE_URL"].rstrip("/")
+    issuer = urlparse(base_url)
+    if not base_url or not issuer.scheme or not issuer.netloc:
+        return None
+    jwks_url = cfg["NEON_AUTH_JWKS_URL"] or f"{base_url}/.well-known/jwks.json"
+    origin = f"{issuer.scheme}://{issuer.netloc}"
+    try:
+        token_header = jwt.get_unverified_header(token)
+        kid = token_header.get("kid")
+        jwks = _fetch_jwks(jwks_url)
+        keys = jwks.get("keys", [])
+        key_data = next((key for key in keys if key.get("kid") == kid), None)
+        if key_data is None and len(keys) == 1:
+            key_data = keys[0]
+        if key_data is None:
+            with _neon_jwks_lock:
+                _neon_jwks_cache = None
+            keys = _fetch_jwks(jwks_url).get("keys", [])
+            key_data = next((key for key in keys if key.get("kid") == kid), None)
+        if key_data is None:
+            return None
+        signing_key = jwt.PyJWK(key_data).key
+        payload = jwt.decode(
+            token,
+            signing_key,
+            algorithms=["EdDSA"],
+            issuer=origin,
+            audience=origin,
+            leeway=30,
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+        )
+        subject = payload.get("sub")
+        email = payload.get("email")
+        if not isinstance(subject, str) or not subject or not isinstance(email, str) or not email:
+            return None
+        from guardloop.database import get_or_create_neon_user
+        user = get_or_create_neon_user(subject, email)
+        g.user_id, g.user_email = user.id, user.email
+        return user.id, user.email
+    except Exception as exc:
+        log.info("Neon Auth token rejected: %s", redact(str(exc)))
+        return None
+
+
+def login_required(view):
+    """Require a verified Neon Auth bearer token for protected resources."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        principal = _verified_neon_user()
+        if principal is None:
+            return err(401, "authentication_required", "sign in to access this resource")
+        g.user_id, g.user_email = principal
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _current_user_id() -> int:
+    return int(g.user_id)
+
+
+def _owns_scan(scan_id: str) -> bool:
+    from guardloop.database import scan_belongs_to
+    return scan_belongs_to(scan_id, _current_user_id())
+
+
+@api.post("/auth/register")
+def register():
+    return err(410, "use_neon_auth", "create accounts through the Neon Auth client")
+
+
+@api.post("/auth/login")
+def login():
+    return err(410, "use_neon_auth", "sign in through the Neon Auth client")
+
+
+@api.post("/auth/logout")
+def logout():
+    return err(410, "use_neon_auth", "sign out through the Neon Auth client")
+
+
+@api.get("/auth/me")
+def me():
+    principal = _verified_neon_user()
+    if principal is None:
+        return jsonify({"user": None})
+    user_id, email = principal
+    return jsonify({"user": {"id": user_id, "email": email}})
+
+
+@api.get("/profile/evaluations")
+@login_required
+def evaluations():
+    from guardloop.database import evaluation_for_user
+    return jsonify(evaluation_for_user(_current_user_id()))
+
+
+@api.get("/scans")
+@login_required
+def list_scans():
+    from guardloop.database import list_scans_for_user
+    return jsonify({"scans": list_scans_for_user(_current_user_id())})
 
 
 @api.get("/mode")
@@ -125,31 +312,45 @@ def assistant_chat():
         "Keep hands-on testing advice scoped to these local labs and non-destructive checks. "
         "Prefer concise, practical answers."
     )
-    try:
-        with httpx.Client(timeout=35, follow_redirects=False) as client:
-            response = client.post(
-                f"{agent_cfg['base_url'].rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {agent_cfg['api_key']}", "Content-Type": "application/json"},
-                json={
-                    "model": agent_cfg["model"],
-                    "messages": [{"role": "system", "content": system}, *safe_history, {"role": "user", "content": message}],
-                    "max_tokens": 600,
-                    "temperature": 0.3,
-                },
-            )
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=35, follow_redirects=False) as client:
+                response = client.post(
+                    f"{agent_cfg['base_url'].rstrip('/')}/chat/completions",
+                    headers={"Authorization": f"Bearer {agent_cfg['api_key']}", "Content-Type": "application/json"},
+                    json={
+                        "model": agent_cfg["model"],
+                        "messages": [{"role": "system", "content": system}, *safe_history, {"role": "user", "content": message}],
+                        "max_tokens": 600,
+                        "temperature": 0.3,
+                    },
+                )
+            if response.status_code == 429 or response.status_code >= 500:
+                last_exc = RuntimeError(f"provider http {response.status_code}")
+                if attempt < 2:
+                    time.sleep(0.8 * (attempt + 1))
+                    continue
+                break
             response.raise_for_status()
             reply = _chat_reply_from_provider(response.json())
             if not reply:
                 raise ValueError("provider response did not contain a text reply")
             return jsonify({"reply": reply, "mode": "live", "provider": agent_cfg["provider"], "model": agent_cfg["model"]})
-    except Exception as exc:
-        log.warning("assistant chat request failed: %s", redact(str(exc)))
-        detail = (
-            "The provider returned an empty text response. Try a different chat model or check the server logs."
-            if str(exc) == "provider response did not contain a text reply"
-            else "The configured model could not answer. Check provider settings and server logs."
-        )
-        return err(502, "assistant_unavailable", detail)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(0.8 * (attempt + 1))
+                continue
+            break
+    error = last_exc or RuntimeError("provider request failed")
+    log.warning("assistant chat request failed: %s", redact(str(error)))
+    detail = (
+        "The provider returned an empty text response. Try a different chat model or check the server logs."
+        if str(error) == "provider response did not contain a text reply"
+        else "The configured model could not answer. Check provider settings and server logs."
+    )
+    return err(502, "assistant_unavailable", detail)
 
 
 @api.post("/assistant/command")
@@ -166,12 +367,16 @@ def assistant_command():
             return err(503, "demo_data_unavailable", "The bundled local demo is not running or its synthetic account data is unavailable.")
     if command == "status":
         scan_id = body.get("scan_id")
+        if scan_id and (_verified_neon_user() is None or not _owns_scan(str(scan_id))):
+            return err(404, "not_found", "no such scan")
         state = manager.get_scan(str(scan_id)) if scan_id else None
         if not state:
             return jsonify({"message": "No scan is selected. Start one with /scan.", "action": "status", "status": "Idle"})
         return jsonify({"message": f"Scan {state.get('id')} is {state.get('status')}. {len(state.get('findings', []))} finding(s) recorded.", "action": "status", "status": state.get("status"), "scan_id": state.get("id")})
     if command == "findings":
         scan_id = body.get("scan_id")
+        if scan_id and (_verified_neon_user() is None or not _owns_scan(str(scan_id))):
+            return err(404, "not_found", "no such scan")
         state = manager.get_scan(str(scan_id)) if scan_id else None
         if not state or not state.get("findings"):
             return jsonify({"message": "No findings are available for the selected scan yet.", "action": "findings", "findings": []})
@@ -190,6 +395,10 @@ def assistant_command():
         except Exception as exc:
             return err(502, "reset_failed", str(exc))
     if command == "scan":
+        principal = _verified_neon_user()
+        if principal is None:
+            return err(401, "authentication_required", "sign in to start a scan")
+        g.user_id, g.user_email = principal
         if body.get("confirmed") is not True:
             return jsonify({"message": "Confirm to start a scan against the bundled local demo at 127.0.0.1:5001.", "action": "confirm_scan", "requires_confirmation": True})
         from guardloop.schemas import ScanConfig
@@ -204,12 +413,13 @@ def assistant_command():
         allowed, reason = is_local_allowed(target)
         if not allowed:
             return err(403, "out_of_scope", reason)
-        scan_id = manager.create_scan(scan_config)
+        scan_id = manager.create_scan(scan_config, _current_user_id())
         return jsonify({"message": f"Local demo scan {scan_id} started. Follow its progress on Overview.", "action": "scan", "scan_id": scan_id})
     return err(400, "unknown_command", "Use one of: /help, /status, /findings, /demo-users, /scan, /reset")
 
 
 @api.post("/scans")
+@login_required
 def create_scan():
     try:
         cfg = ScanConfig(**(request.get_json(force=True, silent=True) or {}))
@@ -223,12 +433,15 @@ def create_scan():
     if not ok:
         _gl("guard").info("guard blocked scan request target=%s: %s", cfg.target, reason)
         return err(403, "out_of_scope", reason)
-    scan_id = manager.create_scan(cfg)
+    scan_id = manager.create_scan(cfg, _current_user_id())
     return jsonify({"id": scan_id})
 
 
 @api.post("/scans/<scan_id>/pause")
+@login_required
 def pause(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     rt = manager.get_runtime(scan_id)
     if not rt:
         return err(404, "not_found", "no such scan")
@@ -237,7 +450,10 @@ def pause(scan_id: str):
 
 
 @api.post("/scans/<scan_id>/resume")
+@login_required
 def resume(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     rt = manager.get_runtime(scan_id)
     if not rt:
         return err(404, "not_found", "no such scan")
@@ -246,7 +462,10 @@ def resume(scan_id: str):
 
 
 @api.post("/scans/<scan_id>/halt")
+@login_required
 def halt(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     rt = manager.get_runtime(scan_id)
     if not rt:
         return err(404, "not_found", "no such scan")
@@ -257,7 +476,10 @@ def halt(scan_id: str):
 
 
 @api.post("/scans/<scan_id>/speed")
+@login_required
 def speed(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     rt = manager.get_runtime(scan_id)
     if not rt:
         return err(404, "not_found", "no such scan")
@@ -271,7 +493,10 @@ def speed(scan_id: str):
 
 
 @api.get("/scans/<scan_id>")
+@login_required
 def get_scan(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     state = manager.get_scan(scan_id)
     if not state:
         return err(404, "not_found", "no such scan")
@@ -279,7 +504,10 @@ def get_scan(scan_id: str):
 
 
 @api.get("/scans/<scan_id>/events")
+@login_required
 def events(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     last_id = request.headers.get("Last-Event-ID", "")
     try:
         last = int(last_id) if last_id else int(request.args.get("lastEventId", "0") or 0)
@@ -305,7 +533,10 @@ def events(scan_id: str):
 
 
 @api.get("/scans/<scan_id>/export")
+@login_required
 def export(scan_id: str):
+    if not _owns_scan(scan_id):
+        return err(404, "not_found", "no such scan")
     state = manager.get_scan(scan_id)
     if not state:
         return err(404, "not_found", "no such scan")
@@ -333,6 +564,7 @@ def get_settings():
 
 
 @api.put("/settings")
+@login_required
 def put_settings():
     try:
         s = Settings(**(request.get_json(force=True, silent=True) or {}))
@@ -343,6 +575,7 @@ def put_settings():
 
 
 @api.post("/llm/test")
+@login_required
 def llm_test():
     agent_cfg = get_agent_llm_config("attack")
     if not agent_cfg["api_key"]:
@@ -356,6 +589,7 @@ def llm_test():
 
 
 @api.post("/target/reset")
+@login_required
 def target_reset():
     cfg = get_config()
     try:

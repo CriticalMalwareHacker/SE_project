@@ -55,6 +55,10 @@ The persistent Assistant dock appears on the right side of every dashboard page.
 
 The assistant does not accept URLs or arbitrary shell commands. It is a guide to this local training app, not a general-purpose pentest agent. Requests for demo account data are served directly from the fixed loopback demo endpoint, not sent to the model provider. Other chat messages leave the machine to be processed by the configured model provider; do not enter secrets or personal data.
 
+## Accounts and email verification
+
+Sign-up and password sign-in use Neon Auth. New accounts receive a 6-digit verification code; enter it on the next screen to finish. Sign-in also supports a passwordless 6-digit email code. Codes expire after 10 minutes, and the development branch uses Neon Auth's shared sender (`auth@mail.myneon.app`). Configure custom SMTP in Neon before production use.
+
 ## Modes
 
 - No OpenRouter or NVIDIA key in `apps/server/.env` → **Mock mode** badge, deterministic `MockRuntime` simulation.
@@ -85,6 +89,17 @@ C:\Python313\python.exe scripts/check_types.py
 npm --prefix apps/web run build
 npm --prefix apps/web run test -- --run
 ```
+
+## End-to-end scan smoke test
+
+Run this after the backend and bundled target are up. It resets the target, starts a scan, polls until completion, and exits non-zero if any endpoint stalls or any finding fails to reach `Reported`.
+
+```bash
+cd apps/server
+C:\Python313\python.exe scripts/scan_smoke.py --email <verified-test-email> --password <password>
+```
+
+You can also pass `--token <neon-jwt>` or set `GUARDLOOP_TOKEN`, `GUARDLOOP_TEST_EMAIL`, and `GUARDLOOP_TEST_PASSWORD`. Use `--endpoints /v1/threads/2 /v1/rate-test` for a shorter focused run, or `--replay-count 4 --mutation-count 2 --max-attempts 2` for a faster smoke check.
 
 ## What was deliberately left out
 

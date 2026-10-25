@@ -54,7 +54,7 @@ class LLMClient:
         budget: dict | None = None,
         fallback: BaseModel | None = None,
         response_model: type[BaseModel] | None = None,
-        timeout: float = 60.0,
+        timeout: float = 25.0,
     ) -> tuple[dict[str, Any], bool]:
         """Returns (parsed_or_fallback_dict, used_fallback). Raises BudgetExceeded."""
         if not self.model:
@@ -127,7 +127,7 @@ class LLMClient:
         if self.reasoning_effort:
             payload["reasoning_effort"] = self.reasoning_effort
         last_err: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(2):
             if cancel is not None and cancel.is_set():
                 raise BudgetExceeded("cancelled")
             try:

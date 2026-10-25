@@ -1,45 +1,109 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader, SectionCard } from "../components/page";
 import { useStore } from "../store";
 import { api } from "../api/client";
 
 export default function Settings() {
   const { settings, saveSettings, scanId } = useStore();
   const [busy, setBusy] = useState(false);
-  if (!settings) return <Skeleton className="h-64" />;
-  const set = (k: string, v: number) => ({ ...settings, [k]: v }) as typeof settings;
-  const num = (label: string, k: string, v: number | undefined) => (
-    <Label>{label}<Input type="number" step="any" value={v ?? 0} onChange={(e) => void saveSettings(set(k, Number(e.target.value)))} /></Label>
+
+  if (!settings) {
+    return (
+      <div>
+        <PageHeader title="Settings" description="Loop budgets, thresholds, and model routing." />
+        <Skeleton className="h-72" />
+      </div>
+    );
+  }
+
+  const update = (key: string, value: number) => {
+    void saveSettings({ ...settings, [key]: value } as typeof settings).catch((error: Error) => toast.error(error.message));
+  };
+
+  const numberField = (label: string, key: string, value: number | undefined) => (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={`setting-${key}`}>{label}</Label>
+      <Input
+        id={`setting-${key}`}
+        type="number"
+        step="any"
+        value={value ?? 0}
+        onChange={(event) => update(key, Number(event.target.value))}
+      />
+    </div>
   );
+
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold text-slate-50">Settings</h1>
-      <Card className="p-5">
-        <div className="grid grid-cols-2 gap-3">
-          {num("Reproducibility threshold", "reproducibility_threshold", settings.reproducibility_threshold)}
-          {num("Max retry attempts", "max_retry_attempts", settings.max_retry_attempts)}
-          {num("Replay count", "replay_count", settings.replay_count)}
-          {num("Mutation count", "mutation_count", settings.mutation_count)}
-          {num("Probe budget", "probe_budget", settings.probe_budget)}
-          {num("LLM call budget", "llm_call_budget", settings.llm_call_budget)}
-          {num("Simulation speed (mock)", "sim_speed", settings.sim_speed)}
-          {num("Hallucination rate (mock)", "hallucination_rate", settings.hallucination_rate)}
-          {num("Fix-failure rate (mock)", "fix_failure_rate", settings.fix_failure_rate)}
+      <PageHeader title="Settings" description="Loop budgets, thresholds, and model routing." />
+
+      <SectionCard title="Loop controls" description="Saved to the server as you edit.">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {numberField("Reproducibility threshold", "reproducibility_threshold", settings.reproducibility_threshold)}
+          {numberField("Max retry attempts", "max_retry_attempts", settings.max_retry_attempts)}
+          {numberField("Replay count", "replay_count", settings.replay_count)}
+          {numberField("Mutation count", "mutation_count", settings.mutation_count)}
+          {numberField("Probe budget", "probe_budget", settings.probe_budget)}
+          {numberField("LLM call budget", "llm_call_budget", settings.llm_call_budget)}
+          {numberField("Simulation speed (mock)", "sim_speed", settings.sim_speed)}
+          {numberField("Hallucination rate (mock)", "hallucination_rate", settings.hallucination_rate)}
+          {numberField("Fix-failure rate (mock)", "fix_failure_rate", settings.fix_failure_rate)}
         </div>
-        <h2 className="mt-4 text-lg font-medium text-slate-50">Agent providers and models (read-only, from server env)</h2>
-        <p className="mb-2 text-xs text-slate-500">Set routing in apps/server/.env. Credentials stay on the server.</p>
-        <pre className="mono mt-1 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-300">{JSON.stringify(settings.models, null, 2)}</pre>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => { setBusy(true); api<{ ok: boolean; detail: string }>("/api/llm/test", { method: "POST" }).then((r) => toast(r.ok ? "Attack Agent provider connected" : r.detail)).catch((e: Error) => toast(e.message)).finally(() => setBusy(false)); }} disabled={busy}>Test Attack Agent provider</Button>
-          {scanId && <Button variant="outline" onClick={() => void api(`/api/scans/${scanId}/export`).then((j) => { const b = new Blob([JSON.stringify(j, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = "scan.json"; a.click(); })}>Export scan JSON</Button>}
-          <Button variant="destructive" onClick={() => void api("/api/target/reset", { method: "POST" }).then(() => toast.success("Target reset to vulnerable baseline"))}>Reset all data</Button>
+      </SectionCard>
+
+      <SectionCard title="Agent providers and models" description="Read-only from apps/server/.env. Credentials stay on the server.">
+        <pre className="mono overflow-auto rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{JSON.stringify(settings.models, null, 2)}</pre>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void api<{ ok: boolean; detail: string }>("/api/llm/test", { method: "POST" })
+                .then((result) => toast(result.ok ? "Attack Agent provider connected" : result.detail))
+                .catch((error: Error) => toast.error(error.message))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Test Attack Agent provider
+          </Button>
+          {scanId && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                void api(`/api/scans/${scanId}/export`)
+                  .then((json) => {
+                    const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement("a");
+                    anchor.href = url;
+                    anchor.download = "scan.json";
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  })
+                  .catch((error: Error) => toast.error(error.message))
+              }
+            >
+              Export scan JSON
+            </Button>
+          )}
+          <Button
+            variant="destructive"
+            onClick={() => {
+              void api("/api/target/reset", { method: "POST" })
+                .then(() => toast.success("Target reset to vulnerable baseline"))
+                .catch((error: Error) => toast.error(error.message));
+            }}
+          >
+            Reset all data
+          </Button>
         </div>
-      </Card>
+      </SectionCard>
     </div>
   );
 }

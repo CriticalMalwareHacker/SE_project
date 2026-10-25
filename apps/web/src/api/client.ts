@@ -1,5 +1,15 @@
-export async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(opts?.headers || {}) } });
+import { clearAuthTokenCache, getNeonJwt } from "../auth";
+
+export async function api<T>(path: string, opts?: RequestInit, retry = true): Promise<T> {
+  const token = await getNeonJwt();
+  const headers = new Headers(opts?.headers);
+  headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const r = await fetch(path, { ...opts, credentials: "same-origin", headers });
+  if (r.status === 401 && retry) {
+    clearAuthTokenCache();
+    return api<T>(path, opts, false);
+  }
   if (!r.ok) {
     let detail = "";
     try {

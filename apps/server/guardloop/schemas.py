@@ -138,7 +138,12 @@ class ScanConfig(BaseModel):
                 "/v1/threads/2",
                 "/v1/rate-test",
             ],
-            "juice_shop": ["/rest/products/search", "/rest/user/whoami"],
+            "juice_shop": [
+                "/rest/products/search",
+                "/rest/user/login",
+                "/ftp/acquisitions.md",
+                "/ftp/package.json.bak",
+            ],
         }
         allowed = set(allowed_by_lab[self.lab])
         endpoints = self.allowed_endpoints or allowed_by_lab[self.lab]

@@ -12,7 +12,9 @@ def _load_env_files() -> None:
     server_dir = Path(__file__).resolve().parents[1]
     project_dir = server_dir.parents[1]
     values: dict[str, str] = {}
-    for path in (project_dir / ".env", server_dir / ".env"):
+    # Neon CLI writes branch-scoped values to the project .env.local by default.
+    # Load it last so the linked Neon branch wins over stale per-machine values.
+    for path in (project_dir / ".env", server_dir / ".env", project_dir / ".env.local"):
         if path.exists():
             values.update({key: value for key, value in dotenv_values(path).items() if value})
     for key, value in values.items():
@@ -31,11 +33,16 @@ def get_config() -> dict:
         "OPENROUTER_BASE_URL": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         "NVIDIA_API_KEY": os.environ.get("NVIDIA_API_KEY", ""),
         "NVIDIA_BASE_URL": os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
+        "NEON_AUTH_BASE_URL": os.environ.get("NEON_AUTH_BASE_URL", ""),
+        "NEON_AUTH_JWKS_URL": os.environ.get("NEON_AUTH_JWKS_URL", ""),
+        "FLASK_SECRET_KEY": os.environ.get("FLASK_SECRET_KEY", "guardloop-local-dev-change-me"),
         "MAX_TOKENS_PER_CALL": int(os.environ.get("MAX_TOKENS_PER_CALL", "2048")),
         "MAX_LLM_CALLS_PER_SCAN": int(os.environ.get("MAX_LLM_CALLS_PER_SCAN", "150")),
         "LLM_CONCURRENCY": int(os.environ.get("LLM_CONCURRENCY", "3")),
         "TARGET_BASE_URL": os.environ.get("TARGET_BASE_URL", "http://127.0.0.1:5001"),
         "TARGET_ADMIN_TOKEN": os.environ.get("TARGET_ADMIN_TOKEN", "change-me"),
+        "MODEL_ATTACK": os.environ.get("MODEL_ATTACK") or os.environ.get("NVIDIA_MODEL_ATTACK", ""),
         "SERVER_PORT": int(os.environ.get("SERVER_PORT", "5000")),
         "WEB_ORIGIN": os.environ.get("WEB_ORIGIN", "http://localhost:5173"),
     }

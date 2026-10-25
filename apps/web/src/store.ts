@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Finding, Metrics, ScanState, Settings } from "./api/types";
 import { api } from "./api/client";
+import { clearAuthTokenCache, getNeonJwt } from "./auth";
 
 export interface BusEvent {
   id: number;
@@ -32,33 +33,57 @@ interface Store {
   setFilters: (s: Partial<Pick<Store, "statusFilter" | "severityFilter" | "search">>) => void;
   control: (action: string, body?: Record<string, unknown>) => Promise<void>;
   saveSettings: (s: Settings) => Promise<void>;
+  reset: () => void;
 }
 
-let es: EventSource | null = null;
+let streamController: AbortController | null = null;
 
 export function disconnectSSE(): void {
-  if (es) {
-    es.close();
-    es = null;
-  }
+  streamController?.abort();
+  streamController = null;
 }
 
 export function connectSSE(scanId: string, onEvent: (e: BusEvent) => void, lastId = 0): void {
   disconnectSSE();
-  const url = `/api/scans/${scanId}/events${lastId ? `?lastEventId=${lastId}` : ""}`;
-  es = new EventSource(url);
-  es.onmessage = (m: MessageEvent) => {
-    try {
-      onEvent(JSON.parse(m.data) as BusEvent);
-    } catch {
-      /* ignore */
+  streamController = new AbortController();
+  const signal = streamController.signal;
+  void (async () => {
+    let cursor = lastId;
+    while (!signal.aborted) {
+      try {
+        const token = await getNeonJwt();
+        if (!token) return;
+        const url = `/api/scans/${scanId}/events${cursor ? `?lastEventId=${cursor}` : ""}`;
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal });
+        if (response.status === 401) {
+          clearAuthTokenCache();
+          return;
+        }
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) {
+            const id = frame.match(/^id:\s*(\d+)/m)?.[1];
+            const data = frame.match(/^data:\s*(.+)$/m)?.[1];
+            if (id) cursor = Number(id);
+            if (data) {
+              try { onEvent(JSON.parse(data) as BusEvent); } catch { /* ignore malformed SSE frames */ }
+            }
+          }
+        }
+      } catch {
+        if (signal.aborted) return;
+      }
+      if (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-  };
-  es.addEventListener("candidate", (m) => onEvent(JSON.parse((m as MessageEvent).data) as BusEvent));
-  es.addEventListener("loopback", (m) => onEvent(JSON.parse((m as MessageEvent).data) as BusEvent));
-  es.onerror = () => {
-    // EventSource auto-reconnects; on reconnect Last-Event-ID is handled by browser for id: fields
-  };
+  })();
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -114,6 +139,20 @@ export const useStore = create<Store>((set, get) => ({
   saveSettings: async (s) => {
     const out = await api<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(s) });
     set({ settings: out });
+  },
+  reset: () => {
+    disconnectSSE();
+    set({
+      mode: "mock",
+      scanId: null,
+      scan: null,
+      events: [],
+      settings: null,
+      statusFilter: "all",
+      severityFilter: "all",
+      search: "",
+      loopPulse: false,
+    });
   },
 }));
 
