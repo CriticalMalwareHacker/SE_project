@@ -4,17 +4,30 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/api/client";
 import { useStore } from "@/store";
+import { RichMessage } from "@/components/RichMessage";
 
-type ChatMessage = { role: "assistant" | "user"; text: string; confirmScan?: boolean };
+type ChatMessage = { role: "assistant" | "user"; text: string; confirmScan?: boolean; confirmFix?: string };
 type CommandReply = {
   message: string;
   action?: string;
   scan_id?: string;
   requires_confirmation?: boolean;
+  confirmation_action?: string;
   findings?: Array<{ id: string; title: string; endpoint: string; severity: string; status: string }>;
 };
 
-const INITIAL: ChatMessage[] = [{ role: "assistant", text: "I can explain GuardLoop or run a local demo command. I only scan the bundled lab on 127.0.0.1:5001." }];
+const INITIAL: ChatMessage[] = [{ role: "assistant", text: "## GuardLoop Assistant\n\nI can explain the **Guard Gate → Attack → Verify & Fix → Confirm → Report** loop, run an approved local scan, and apply a requested remediation to the bundled lab at `127.0.0.1:5001`.\n\nAsk `what are the agents doing?`, or try `fix prompt injection`, `fix XSS`, `fix SSRF`, `fix access control`, or `fix rate limiting`. I will always ask you to confirm before changing the lab." }];
+
+function requestedFix(value: string) {
+  const text = value.toLowerCase();
+  if (!/\b(fix|patch|remediate|harden|secure)\b/.test(text)) return null;
+  if (/prompt|injection|system prompt|jailbreak/.test(text)) return "HARDEN_PROMPT";
+  if (/xss|escape|output/.test(text)) return "ESCAPE_OUTPUT";
+  if (/ssrf|fetch|allowlist|metadata/.test(text)) return "HOST_ALLOWLIST";
+  if (/bola|access control|ownership|tenant|thread/.test(text)) return "OWNERSHIP_CHECK";
+  if (/rate|header/.test(text)) return "NORMALIZE_HEADERS";
+  return null;
+}
 
 export default function AssistantDock() {
   const [open, setOpen] = useState(true);
@@ -53,7 +66,11 @@ export default function AssistantDock() {
     const details = result.findings?.length
       ? `\n\n${result.findings.map((finding) => `· ${finding.severity} · ${finding.title} (${finding.status}) — ${finding.endpoint}`).join("\n")}`
       : "";
-    setMessages((current) => [...current, { role: "assistant", text: result.message + details, confirmScan: result.requires_confirmation }]);
+    setMessages((current) => [...current, {
+      role: "assistant", text: result.message + details,
+      confirmScan: result.requires_confirmation && (result.confirmation_action === "scan" || result.action === "confirm_scan"),
+      confirmFix: result.requires_confirmation && result.confirmation_action?.startsWith("fix:") ? result.confirmation_action : undefined,
+    }]);
   }
 
   async function submit(event: FormEvent) {
@@ -65,7 +82,9 @@ export default function AssistantDock() {
     setBusy(true);
     try {
       const command = value.match(/^\/(help|status|findings|demo-users|scan|reset)\s*$/i)?.[1]?.toLowerCase();
+      const fix = requestedFix(value);
       if (command) await runCommand(command);
+      else if (fix) await runCommand(`fix:${fix}`);
       else {
         const history = messages.slice(-10).map((item) => ({ role: item.role, content: item.text }));
         const result = await api<{ reply?: unknown }>("/api/assistant/chat", { method: "POST", body: JSON.stringify({ message: value, history }) });
@@ -113,7 +132,7 @@ export default function AssistantDock() {
                   message.role === "user" ? "ml-auto bg-primary/10 text-foreground" : "mr-auto border border-border bg-muted/30 text-foreground"
                 }`}
               >
-                {message.text}
+                {message.role === "assistant" ? <RichMessage text={message.text} /> : message.text}
                 {message.confirmScan && (
                   <Button
                     size="sm"
@@ -131,6 +150,16 @@ export default function AssistantDock() {
                     }}
                   >
                     Confirm local scan
+                  </Button>
+                )}
+                {message.confirmFix && (
+                  <Button size="sm" className="mt-3 w-full" disabled={busy} onClick={async () => {
+                    setBusy(true);
+                    try { await runCommand(message.confirmFix!, true); }
+                    catch (error) { setMessages((current) => [...current, { role: "assistant", text: error instanceof Error ? error.message : "Could not apply the requested local fix." }]); }
+                    finally { setBusy(false); }
+                  }}>
+                    Apply and verify local fix
                   </Button>
                 )}
               </div>

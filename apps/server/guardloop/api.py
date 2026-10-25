@@ -271,6 +271,34 @@ def _chat_reply_from_provider(payload: object) -> str:
     return refusal.strip() if isinstance(refusal, str) else ""
 
 
+# The conversational assistant can select only these documented mitigations. It
+# never accepts a route, shell command, or arbitrary patch from chat text.
+_FIX_DETAILS = {
+    "HARDEN_PROMPT": ("Prompt-injection defense", "filters instruction-override patterns and blocks sensitive prompt disclosure", 2),
+    "ESCAPE_OUTPUT": ("Output encoding", "HTML-escapes untrusted content before it is shown in the admin console", 1),
+    "HOST_ALLOWLIST": ("Outbound host allowlist", "blocks requests to the lab's simulated metadata service", 1),
+    "OWNERSHIP_CHECK": ("Ownership enforcement", "rejects cross-tenant thread access", 1),
+    "NORMALIZE_HEADERS": ("Rate-limit normalization", "normalizes API keys before applying rate limits", 1),
+}
+
+
+def _apply_local_assistant_fix(mitigation: str) -> dict:
+    """Apply one fixed, documented mitigation to the bundled loopback lab only."""
+    if mitigation not in _FIX_DETAILS:
+        raise ValueError("unknown local mitigation")
+    cfg = get_config()
+    if cfg["TARGET_BASE_URL"].rstrip("/") not in ("http://127.0.0.1:5001", "http://localhost:5001"):
+        raise PermissionError("Assistant fixes are fixed to the bundled demo at 127.0.0.1:5001")
+    name, explanation, level = _FIX_DETAILS[mitigation]
+    import httpx
+    with httpx.Client(timeout=8, follow_redirects=False) as client:
+        response = client.post("http://127.0.0.1:5001/admin/patch", json={"mitigation": mitigation, "level": level}, headers={"X-Admin-Token": cfg["TARGET_ADMIN_TOKEN"]})
+        response.raise_for_status()
+        health = client.get("http://127.0.0.1:5001/health")
+        health.raise_for_status()
+    return {"name": name, "explanation": explanation, "level": level, "mitigations": health.json().get("mitigations", {})}
+
+
 @api.post("/assistant/chat")
 def assistant_chat():
     """Ask the configured model about GuardLoop and safe local-lab testing."""
@@ -307,6 +335,8 @@ def assistant_chat():
         "The scan form supports the bundled GuardLoop lab on loopback port 5001 and a local OWASP Juice Shop on loopback port 3000. "
         "The Juice Shop profile performs fixed read-only GET checks and is not a full security assessment. "
         "Explain GuardLoop, its agents, findings, safe lab concepts, and remediation. "
+        "Use clean Markdown: short ## headings, **bold labels**, and - bullets. When explaining a scan, describe the concrete Guard Gate, Attack, Verify & Fix, Confirm, and Report stages in that order. "
+        "If the user asks to fix something, explain that the UI can apply only approved bundled-lab remediations after confirmation; never imply that a patch happened unless it is reported by the system. "
         "Never claim you ran an action. You have no tools and cannot execute commands. "
         "Do not help retrieve, dump, or reuse passwords, tokens, personal data, or secrets. "
         "Keep hands-on testing advice scoped to these local labs and non-destructive checks. "
@@ -358,6 +388,24 @@ def assistant_command():
     """Run only explicit, fixed local-demo commands; never accepts arbitrary URLs."""
     body = request.get_json(force=True, silent=True) or {}
     command = str(body.get("command", "")).strip().lower()
+    if command.startswith("fix:"):
+        mitigation = command.removeprefix("fix:").upper()
+        if mitigation not in _FIX_DETAILS:
+            return err(400, "unknown_fix", "Choose a supported local remediation")
+        principal = _verified_neon_user()
+        if principal is None:
+            return err(401, "authentication_required", "sign in to apply a bundled-lab remediation")
+        if body.get("confirmed") is not True:
+            name, explanation, level = _FIX_DETAILS[mitigation]
+            return jsonify({"message": f"## Ready to apply: **{name}**\n\n- **Scope:** bundled lab only (`127.0.0.1:5001`)\n- **Change:** {explanation}\n- **Strength:** level {level}\n\nConfirm to apply the patch and read back the active mitigation state.", "action": "confirm_fix", "requires_confirmation": True, "confirmation_action": f"fix:{mitigation.lower()}"})
+        try:
+            result = _apply_local_assistant_fix(mitigation)
+        except PermissionError as exc:
+            return err(403, "out_of_scope", str(exc))
+        except Exception as exc:
+            return err(502, "fix_failed", str(exc))
+        active = result["mitigations"].get(mitigation, 0)
+        return jsonify({"message": f"## Fix applied and verified\n\n- **Remediation:** {result['name']}\n- **Outcome:** {result['explanation']}\n- **Verification:** lab health check reports `{mitigation} = {active}`\n\nRun `/scan` to validate the defensive outcome through the full agent loop.", "action": "fix", "mitigations": result["mitigations"]})
     if command == "help":
         return jsonify({"message": "Commands: /help, /status, /findings, /demo-users, /scan, /reset. /demo-users shows fake local training credentials. /scan asks for an explicit confirmation and only targets the bundled local demo.", "action": "help"})
     if command == "demo-users":
