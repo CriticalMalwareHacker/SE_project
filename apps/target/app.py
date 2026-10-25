@@ -50,6 +50,21 @@ def create_app() -> Flask:
         want = os.environ.get("TARGET_ADMIN_TOKEN", "change-me")
         return token == want
 
+    @app.get("/")
+    def home():
+        """A presentation-friendly, local-only view of the bundled API lab."""
+        return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GuardLoop Local Training Lab</title>
+<style>body{margin:0;background:#0b1220;color:#e5e7eb;font:16px system-ui,sans-serif}main{max-width:760px;margin:48px auto;padding:0 24px}h1{margin-bottom:8px}p{line-height:1.55;color:#b8c2d4}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#123044;color:#75e6c8;font-size:13px}section{margin-top:24px;padding:20px;border:1px solid #26354c;border-radius:12px;background:#101a2b}textarea{box-sizing:border-box;width:100%;min-height:90px;padding:12px;border:1px solid #40526d;border-radius:8px;background:#080e18;color:#fff;font:inherit}button{margin-top:10px;padding:10px 14px;border:0;border-radius:8px;background:#20b89b;color:#062019;font-weight:700;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border-radius:8px;background:#080e18;color:#cbd5e1}a{color:#75e6c8}</style></head>
+<body><main><span class="pill">Local demo · 127.0.0.1:5001</span><h1>GuardLoop Training Lab</h1>
+<p>This is the deliberately vulnerable practice API used by GuardLoop. It runs only on your computer. The form below sends a demonstration request to <code>/v1/chat/completions</code>.</p>
+<section><h2>Chat-completions demo</h2><p>Enter a normal message such as <code>Hello</code>. GuardLoop performs the security checks; this page simply lets you show the underlying local API.</p>
+<textarea id="prompt" placeholder="Hello"></textarea><button id="send">Send local request</button><pre id="result" aria-live="polite">Response will appear here.</pre></section>
+<section><h2>Useful local endpoints</h2><p><a href="/health">/health</a> shows the lab health and active mitigation levels. The API endpoint itself accepts POST requests only: <code>/v1/chat/completions</code>.</p></section>
+<script>const prompt=document.getElementById('prompt'),result=document.getElementById('result');document.getElementById('send').onclick=async()=>{result.textContent='Sending…';try{const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt.value||'Hello'})});result.textContent=JSON.stringify(await r.json(),null,2)}catch(e){result.textContent='Request failed: '+e.message}};</script>
+</main></body></html>"""
+
     @app.get("/health")
     def health():
         return jsonify({"ok": True, "mitigations": app.config["MITIGATIONS"]})
